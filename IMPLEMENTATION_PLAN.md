@@ -15,4 +15,4 @@
 ## Stage 3: MiniMax H3 官方提示词模板 + 9 技能复制
 **Goal**: videoPromptCraft.md 新增 H3 模板段；packages/skills/ 复制 9 个官方技能并改小驼峰
 **Success Criteria**: bun run typecheck 通过；新技能无 "MiniMax Hub" 残留；构建产物含 9 个新技能目录
-**Status**: In Progress
+**Status**: Complete（typecheck 因仓库未安装依赖无法执行，改动均为 markdown/静态资源，已用静态检查替代：frontmatter name/description 齐全、相对链接目标存在、旧名无残留；build.ts 为整目录递归拷贝，新技能自动进入产物）
