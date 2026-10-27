@@ -242,19 +242,29 @@ function patchOptions(workflow: workflow, aspectRatio: string | undefined, resol
   durationNode.inputs!.value = duration > 0 ? duration : 5;
 }
 
-// 各版本 ResolutionSelector 的 aspect_ratio 显示名不一致（如 '9:16 (Portrait)' / '9:16 (Portrait Video)'），
+// 各版本 ResolutionSelector 的 aspect_ratio 显示名不一致（如 '9:16 (Portrait)' / '9:16 (Portrait Widescreen)'），
 // 从 ComfyUI object_info 拉取该节点实际支持的选项，按「比例前缀」匹配；拉取失败时退回静态映射。
+// object_info 里 COMBO 输入有新旧两种格式：旧版 [[选项...], {...}]，新版 ["COMBO", {options: [...]}]；偶见纯选项数组。
+function comboOptions(value: unknown): string[] {
+  if (!Array.isArray(value) || value.length === 0) return [];
+  if (value.every((item) => typeof item === "string")) return value as string[];
+  if (Array.isArray(value[0])) return value[0]!.filter((item) => typeof item === "string");
+  const config = value[1];
+  if (value[0] === "COMBO" && config && typeof config === "object" && Array.isArray((config as { options?: unknown[] }).options)) {
+    return (config as { options: unknown[] }).options.filter((item) => typeof item === "string");
+  }
+  return [];
+}
+
 async function resolveAspectRatio(context: providerContext, base: string, classType: string, ratio: string) {
   try {
     const response = await context.tool.fetch(`${base}/object_info/${encodeURIComponent(classType)}`);
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
-    const data = (await response.json()) as Record<string, { input?: { required?: Record<string, unknown[]> } }>;
-    const allowed = data[classType]?.input?.required?.aspect_ratio?.[0];
-    if (Array.isArray(allowed) && allowed.length > 0) {
-      const matched = allowed.find(
-        (value) => typeof value === "string" && (value === ratio || value.startsWith(`${ratio} `) || value.startsWith(`${ratio}(`)),
-      );
-      if (matched) return matched as string;
+    const data = (await response.json()) as Record<string, { input?: { required?: Record<string, unknown> } }>;
+    const allowed = comboOptions(data[classType]?.input?.required?.aspect_ratio);
+    if (allowed.length > 0) {
+      const matched = allowed.find((value) => value === ratio || value.startsWith(`${ratio} `) || value.startsWith(`${ratio}(`));
+      if (matched) return matched;
       throw new Error(`ResolutionSelector 不支持比例 ${ratio}，可选值：${allowed.slice(0, 12).join("、")}`);
     }
   } catch (error) {
