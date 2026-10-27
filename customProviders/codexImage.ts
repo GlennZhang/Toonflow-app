@@ -17,12 +17,6 @@ const rules = [
 
 const version = "1.0.0";
 
-const readme = `通过本机 codex CLI（ChatGPT 账号登录，image_generation feature）生成图片。codex 无法被 Toonflow 供应商直接调用，需先启动本地桥接服务：
-
-bun customProviders/codexBridge/server.ts
-
-前置：codex login 登录 ChatGPT 账号；如需代理，桥接启动参数加 --proxy。单张出图约 2-4 分钟，建议单人使用；请勿把桥接服务暴露到公网。`;
-
 type mediaInput =
   | { type: "url"; url: string; mimeType?: string; name?: string }
   | { type: "base64"; data: string; mimeType: string; name?: string }
@@ -47,7 +41,11 @@ export default {
   id: "codexImage",
   label: "Codex 图片生成",
   version,
-  readme,
+  readme: `通过本机 codex CLI（ChatGPT 账号登录，image_generation feature）生成图片。codex 无法被 Toonflow 供应商直接调用，需先启动本地桥接服务：
+
+bun customProviders/codexBridge/server.ts
+
+前置：codex login 登录 ChatGPT 账号；如需代理，桥接启动参数加 --proxy。单张出图约 2-4 分钟，建议单人使用；请勿把桥接服务暴露到公网。`,
   rules,
   models: [
     {

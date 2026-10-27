@@ -52,15 +52,6 @@ const rules = [
 
 const version = "1.0.0";
 
-const readme = `通过远程 ComfyUI 的 MiniMax H3 节点生成视频，支持文生视频（t2v）、首帧图生视频（i2v）与多参考图生视频（r2v，最多 10 张）。
-
-使用步骤：
-1. 在 ComfyUI 中分别加载三种模式的工作流，用 Save (API Format) 导出 JSON，粘贴到对应配置项；
-2. 工作流需包含 MiniMax H3 生成节点、ResolutionSelector 节点、标题含 Duration/时长的数值节点；i2v/r2v 需含 LoadImage 节点，输出需 SaveVideo 节点；
-3. ComfyUI 服务地址须能被运行 Toonflow 的机器访问（提交、上传与取回视频走同一地址）。
-
-分镜提示词可配合 MiniMax H3 官方提示词模板（h3PromptWriting 技能）使用。`;
-
 // ResolutionSelector 的显示值映射；节点里没有 aspect_ratio 字段时不写入。
 const aspectRatioValues: Record<string, string> = {
   "16:9": "16:9 (Widescreen)",
@@ -146,11 +137,7 @@ function multipart(fields: multipartField[]) {
     }
     if (field.mimeType) head += `\r\nContent-Type: ${field.mimeType}`;
     head += "\r\n\r\n";
-    chunks.push(
-      Buffer.from(head, "utf8"),
-      Buffer.from(typeof field.value === "string" ? field.value : field.value),
-      Buffer.from("\r\n", "utf8"),
-    );
+    chunks.push(Buffer.from(head, "utf8"), Buffer.from(typeof field.value === "string" ? field.value : field.value), Buffer.from("\r\n", "utf8"));
   }
   chunks.push(Buffer.from(`--${boundary}--\r\n`, "utf8"));
   return { body: Buffer.concat(chunks), contentType: `multipart/form-data; boundary=${boundary}` };
@@ -163,7 +150,7 @@ async function uploadImage(context: providerContext, base: string, bytes: Uint8A
   ]);
   const response = await context.tool.fetch(`${base}/upload/image`, { method: "POST", headers: { "Content-Type": contentType }, body });
   if (!response.ok) throw new Error(`上传图片失败：HTTP ${response.status} ${(await response.text()).slice(0, 200)}`);
-  const data = await response.json() as { name?: string };
+  const data = (await response.json()) as { name?: string };
   if (!data?.name) throw new Error("ComfyUI 上传图片未返回文件名");
   return data.name;
 }
@@ -177,7 +164,12 @@ function parseWorkflow(source: unknown, title: string): workflow {
   } catch {
     throw new Error(`${title}工作流 JSON 解析失败，请重新导出粘贴`);
   }
-  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed) || !Object.values(parsed).some(value => value && typeof value === "object" && "class_type" in value)) {
+  if (
+    !parsed ||
+    typeof parsed !== "object" ||
+    Array.isArray(parsed) ||
+    !Object.values(parsed).some((value) => value && typeof value === "object" && "class_type" in value)
+  ) {
     throw new Error(`${title}工作流不是 API 格式（顶层应为 {节点id: {class_type, inputs}}）；请在 ComfyUI 勾选开发者模式后用 Save (API Format) 导出`);
   }
   return JSON.parse(JSON.stringify(parsed)) as workflow;
@@ -239,7 +231,7 @@ function patchRefImages(workflow: workflow, names: string[]) {
 
 function patchOptions(workflow: workflow, ratio: string, resolution: string, duration: number) {
   const resolutionNode = Object.values(workflow).find(
-    node => node?.class_type === "ResolutionSelector" || (node.inputs?.megapixels != null && node.inputs?.aspect_ratio != null),
+    (node) => node?.class_type === "ResolutionSelector" || (node.inputs?.megapixels != null && node.inputs?.aspect_ratio != null),
   );
   if (!resolutionNode) throw new Error("工作流中未找到 ResolutionSelector（或含 megapixels/aspect_ratio 输入）的分辨率节点");
   resolutionNode.inputs ?? (resolutionNode.inputs = {});
@@ -247,9 +239,7 @@ function patchOptions(workflow: workflow, ratio: string, resolution: string, dur
   if ("aspect_ratio" in resolutionNode.inputs) {
     resolutionNode.inputs.aspect_ratio = aspectRatioValues[ratio] ?? aspectRatioValues["16:9"]!;
   }
-  const durationNode = Object.values(workflow).find(
-    node => node.inputs?.value != null && /duration|时长/i.test(String(node._meta?.title ?? "")),
-  );
+  const durationNode = Object.values(workflow).find((node) => node.inputs?.value != null && /duration|时长/i.test(String(node._meta?.title ?? "")));
   if (!durationNode) throw new Error("工作流中未找到标题含 Duration/时长 且带 value 输入的时长节点");
   durationNode.inputs!.value = duration > 0 ? duration : 5;
 }
@@ -257,11 +247,15 @@ function patchOptions(workflow: workflow, ratio: string, resolution: string, dur
 // ComfyUI 提交失败时的 node_errors 结构不在通用 errorMessage 的提取范围内，单独拼可读信息。
 function promptError(data: unknown, fallback: string) {
   if (!data || typeof data !== "object") return fallback;
-  const record = data as { error?: { message?: string; type?: string }; node_errors?: Record<string, { errors?: { message?: string; details?: string }[] }> };
+  const record = data as {
+    error?: { message?: string; type?: string };
+    node_errors?: Record<string, { errors?: { message?: string; details?: string }[] }>;
+  };
   const parts: string[] = [];
   if (record.error?.message) parts.push(record.error.type ? `${record.error.message}（${record.error.type}）` : record.error.message);
   for (const [id, node] of Object.entries(record.node_errors ?? {})) {
-    for (const error of node.errors ?? []) parts.push(`节点 ${id}: ${error.message ?? ""}${error.details ? ` (${error.details.slice(0, 120)})` : ""}`);
+    for (const error of node.errors ?? [])
+      parts.push(`节点 ${id}: ${error.message ?? ""}${error.details ? ` (${error.details.slice(0, 120)})` : ""}`);
   }
   return parts.length ? parts.join("；").slice(0, 500) : fallback;
 }
@@ -294,7 +288,14 @@ async function submitPrompt(context: providerContext, base: string, workflow: wo
 
 type historyEntry = {
   status?: { status_str?: string; completed?: boolean; messages?: unknown[] };
-  outputs?: Record<string, { videos?: { filename: string; subfolder?: string; type?: string }[]; gifs?: { filename: string; subfolder?: string; type?: string }[]; images?: { filename: string; subfolder?: string; type?: string }[] }>;
+  outputs?: Record<
+    string,
+    {
+      videos?: { filename: string; subfolder?: string; type?: string }[];
+      gifs?: { filename: string; subfolder?: string; type?: string }[];
+      images?: { filename: string; subfolder?: string; type?: string }[];
+    }
+  >;
 };
 
 async function pollResult(context: providerContext, base: string, promptId: string, signal: AbortSignal, intervalMs: number) {
@@ -304,7 +305,7 @@ async function pollResult(context: providerContext, base: string, promptId: stri
     try {
       const response = await context.tool.fetch(`${base}/history/${encodeURIComponent(promptId)}`, { signal });
       if (!response.ok) continue;
-      const history = await response.json() as Record<string, historyEntry>;
+      const history = (await response.json()) as Record<string, historyEntry>;
       entry = history?.[promptId];
     } catch (error) {
       if (signal.aborted) throw error;
@@ -313,7 +314,7 @@ async function pollResult(context: providerContext, base: string, promptId: stri
     if (!entry) continue;
     const status = entry.status;
     if (status?.status_str?.toLowerCase() === "error") {
-      const message = status.messages?.map(item => (Array.isArray(item) ? item.join(": ") : String(item))).join("; ") ?? "";
+      const message = status.messages?.map((item) => (Array.isArray(item) ? item.join(": ") : String(item))).join("; ") ?? "";
       throw new Error(`ComfyUI 执行失败：${message.slice(0, 300) || "未知错误"}`);
     }
     if (status?.completed) {
@@ -333,7 +334,14 @@ export default {
   id: "comfyuiMiniMaxH3",
   label: "ComfyUI MiniMax H3",
   version,
-  readme,
+  readme: `通过远程 ComfyUI 的 MiniMax H3 节点生成视频，支持文生视频（t2v）、首帧图生视频（i2v）与多参考图生视频（r2v，最多 10 张）。
+
+使用步骤：
+1. 在 ComfyUI 中分别加载三种模式的工作流，用 Save (API Format) 导出 JSON，粘贴到对应配置项；
+2. 工作流需包含 MiniMax H3 生成节点、ResolutionSelector 节点、标题含 Duration/时长的数值节点；i2v/r2v 需含 LoadImage 节点，输出需 SaveVideo 节点；
+3. ComfyUI 服务地址须能被运行 Toonflow 的机器访问（提交、上传与取回视频走同一地址）。
+
+分镜提示词可配合 MiniMax H3 官方提示词模板（h3PromptWriting 技能）使用。`,
   rules,
   models: [
     {
@@ -356,7 +364,9 @@ export default {
     ratio?: string;
     resolution?: string;
   }) {
-    const base = String(this.config.baseUrl ?? "").trim().replace(/\/+$/, "");
+    const base = String(this.config.baseUrl ?? "")
+      .trim()
+      .replace(/\/+$/, "");
     if (!base) throw new Error("请填写 ComfyUI 服务地址");
     if (request.audios?.length) throw new Error("ComfyUI MiniMax H3 工作流不支持音频参考输入，请移除音频素材");
     if (request.videos?.length) throw new Error("ComfyUI MiniMax H3 工作流不支持视频参考输入，请移除视频素材");
