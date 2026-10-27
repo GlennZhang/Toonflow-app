@@ -229,19 +229,38 @@ function patchRefImages(workflow: workflow, names: string[]) {
   for (let index = names.length; inputs[`${prefix}${index}`] != null; index++) delete inputs[`${prefix}${index}`];
 }
 
-function patchOptions(workflow: workflow, ratio: string, resolution: string, duration: number) {
+function patchOptions(workflow: workflow, aspectRatio: string | undefined, resolution: string, duration: number) {
   const resolutionNode = Object.values(workflow).find(
     (node) => node?.class_type === "ResolutionSelector" || (node.inputs?.megapixels != null && node.inputs?.aspect_ratio != null),
   );
   if (!resolutionNode) throw new Error("工作流中未找到 ResolutionSelector（或含 megapixels/aspect_ratio 输入）的分辨率节点");
   resolutionNode.inputs ?? (resolutionNode.inputs = {});
   resolutionNode.inputs.megapixels = resolutionMegapixels[String(resolution).toLowerCase()] ?? resolutionMegapixels["480p"]!;
-  if ("aspect_ratio" in resolutionNode.inputs) {
-    resolutionNode.inputs.aspect_ratio = aspectRatioValues[ratio] ?? aspectRatioValues["16:9"]!;
-  }
+  if (aspectRatio != null && "aspect_ratio" in resolutionNode.inputs) resolutionNode.inputs.aspect_ratio = aspectRatio;
   const durationNode = Object.values(workflow).find((node) => node.inputs?.value != null && /duration|时长/i.test(String(node._meta?.title ?? "")));
   if (!durationNode) throw new Error("工作流中未找到标题含 Duration/时长 且带 value 输入的时长节点");
   durationNode.inputs!.value = duration > 0 ? duration : 5;
+}
+
+// 各版本 ResolutionSelector 的 aspect_ratio 显示名不一致（如 '9:16 (Portrait)' / '9:16 (Portrait Video)'），
+// 从 ComfyUI object_info 拉取该节点实际支持的选项，按「比例前缀」匹配；拉取失败时退回静态映射。
+async function resolveAspectRatio(context: providerContext, base: string, classType: string, ratio: string) {
+  try {
+    const response = await context.tool.fetch(`${base}/object_info/${encodeURIComponent(classType)}`);
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    const data = (await response.json()) as Record<string, { input?: { required?: Record<string, unknown[]> } }>;
+    const allowed = data[classType]?.input?.required?.aspect_ratio?.[0];
+    if (Array.isArray(allowed) && allowed.length > 0) {
+      const matched = allowed.find(
+        (value) => typeof value === "string" && (value === ratio || value.startsWith(`${ratio} `) || value.startsWith(`${ratio}(`)),
+      );
+      if (matched) return matched as string;
+      throw new Error(`ResolutionSelector 不支持比例 ${ratio}，可选值：${allowed.slice(0, 12).join("、")}`);
+    }
+  } catch (error) {
+    if (error instanceof Error && error.message.includes("不支持比例")) throw error;
+  }
+  return aspectRatioValues[ratio] ?? aspectRatioValues["16:9"]!;
 }
 
 // ComfyUI 提交失败时的 node_errors 结构不在通用 errorMessage 的提取范围内，单独拼可读信息。
@@ -388,7 +407,11 @@ export default {
     const context: providerContext = this as providerContext;
 
     patchPrompt(workflow, request.prompt.trim());
-    patchOptions(workflow, request.ratio || "16:9", String(request.resolution ?? ""), Number(request.duration ?? 0));
+    const resolutionClassType = Object.values(workflow).find(
+      (node) => node?.class_type === "ResolutionSelector" || (node.inputs?.megapixels != null && node.inputs?.aspect_ratio != null),
+    )?.class_type;
+    const aspectRatio = resolutionClassType ? await resolveAspectRatio(context, base, resolutionClassType, request.ratio || "16:9") : undefined;
+    patchOptions(workflow, aspectRatio, String(request.resolution ?? ""), Number(request.duration ?? 0));
     if (mode === "i2v") {
       const bytes = await toBytes(context, request.firstFrame!);
       const name = await uploadImage(context, base, bytes, `toonflow_firstframe_${stamp}.png`, "image/png");
