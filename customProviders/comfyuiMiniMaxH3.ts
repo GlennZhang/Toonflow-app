@@ -29,6 +29,13 @@ const rules = [
   },
   {
     type: "input",
+    field: "workflowR2vTurbo" as const,
+    title: "r2v Turbo 工作流（LoRA 快速版，选 MiniMax-H3-Turbo 模型时使用）",
+    value: "",
+    props: { type: "textarea", rows: 6, placeholder: "在 ComfyUI 用 Save (API Format) 导出后粘贴 JSON" },
+  },
+  {
+    type: "input",
     field: "clientId" as const,
     title: "client_id（可选）",
     value: "",
@@ -381,6 +388,14 @@ export default {
       audio: "optional",
       durationResolutionMap: [{ duration: [4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15], resolution: ["480p", "720p", "1080p"] }],
     },
+    {
+      id: "MiniMax-H3-Turbo",
+      label: "MiniMax H3 Turbo (ComfyUI, LoRA 4步快速版)",
+      type: "video",
+      mode: ["text", "startFrameOptional", ["imageReference:10"]],
+      audio: "optional",
+      durationResolutionMap: [{ duration: [4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15], resolution: ["480p", "720p", "1080p"] }],
+    },
   ],
   async generateVideo(request: {
     prompt: string;
@@ -404,9 +419,17 @@ export default {
     const references = (request.images ?? []).slice(0, 10);
     const hasFirstFrame = !!request.firstFrame;
     const mode = references.length > 0 ? "r2v" : hasFirstFrame ? "i2v" : "t2v";
+    // Turbo 模型只影响 r2v 路线：走 LoRA 快速工作流；t2v/i2v 与完整版共用。
+    const useTurbo = request.model === "MiniMax-H3-Turbo";
     const workflow = parseWorkflow(
-      mode === "r2v" ? this.config.workflowR2v : mode === "i2v" ? this.config.workflowI2v : this.config.workflowT2v,
-      mode === "r2v" ? "r2v" : mode === "i2v" ? "i2v" : "t2v",
+      mode === "r2v"
+        ? useTurbo
+          ? this.config.workflowR2vTurbo
+          : this.config.workflowR2v
+        : mode === "i2v"
+          ? this.config.workflowI2v
+          : this.config.workflowT2v,
+      mode === "r2v" ? (useTurbo ? "r2v Turbo" : "r2v") : mode === "i2v" ? "i2v" : "t2v",
     );
 
     const timeoutMinutes = numberConfig(this.config.timeoutMinutes, 20);
