@@ -73,13 +73,15 @@ export default {
   rules,
   models: [
     {
-      id: voiceModelId,
+      id: "Qwen3-TTS-12Hz-1.7B-VoiceDesign-4bit",
       label: "Qwen3-TTS VoiceDesign（文字设计音色）",
       type: "audio",
     },
   ],
   async generateAudio(request: { prompt?: string; text?: string; speed?: number; format?: string }) {
-    const baseUrl = String(this.config.baseUrl ?? "").trim().replace(/\/+$/, "");
+    const baseUrl = String(this.config.baseUrl ?? "")
+      .trim()
+      .replace(/\/+$/, "");
     if (!baseUrl) throw new Error("请填写 oMLX 服务地址");
     const apiKey = String(this.config.apiKey ?? "").trim() || "noapikey";
     const timeoutMinutes = Number(this.config.timeoutMinutes);
