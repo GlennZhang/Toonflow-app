@@ -130,6 +130,15 @@ function imageExtension(mimeType: string | undefined) {
   return "png";
 }
 
+function audioExtension(mimeType?: string): string {
+  if (!mimeType) return "wav";
+  if (mimeType.includes("wav")) return "wav";
+  if (mimeType.includes("mpeg") || mimeType.includes("mp3")) return "mp3";
+  if (mimeType.includes("ogg")) return "ogg";
+  if (mimeType.includes("flac")) return "flac";
+  return "wav";
+}
+
 type multipartField = { name: string; filename?: string; mimeType?: string; value: string | Uint8Array };
 
 // 沙箱内没有 FormData，手工构造 multipart 表单体。
@@ -231,6 +240,40 @@ function patchRefImages(workflow: workflow, names: string[]) {
       workflow[String(loadId)] = { class_type: "LoadImage", inputs: {} };
     }
     workflow[String(loadId)]!.inputs!.image = names[index]!;
+    inputs[`${prefix}${index}`] = [String(loadId), 0];
+  }
+  for (let index = names.length; inputs[`${prefix}${index}`] != null; index++) delete inputs[`${prefix}${index}`];
+}
+
+function patchRefAudios(workflow: workflow, names: string[]) {
+  const { node } = findGenNode(workflow);
+  const inputs = node.inputs ?? (node.inputs = {});
+  let prefix = "ref_audios.ref_audio_";
+  for (const key of Object.keys(inputs)) {
+    if (/ref_audio_0$/.test(key)) {
+      prefix = key.slice(0, -1);
+      break;
+    }
+  }
+  const loadIds = Object.entries(workflow)
+    .filter(([, n]) => n?.class_type === "LoadAudio")
+    .map(([id]) => Number(id))
+    .filter(Number.isFinite)
+    .sort((a, b) => a - b);
+  const allIds = Object.keys(workflow)
+    .map(Number)
+    .filter(Number.isFinite);
+  let maxId = allIds.length ? Math.max(...allIds) : 0;
+
+  for (let index = 0; index < names.length; index++) {
+    let loadId = loadIds[index];
+    if (loadId == null) {
+      maxId += 1;
+      loadId = maxId;
+      workflow[String(loadId)] = { class_type: "LoadAudio", inputs: {} };
+    }
+    workflow[String(loadId)]!.inputs ??= {};
+    workflow[String(loadId)]!.inputs!.audio = names[index]!;
     inputs[`${prefix}${index}`] = [String(loadId), 0];
   }
   for (let index = names.length; inputs[`${prefix}${index}`] != null; index++) delete inputs[`${prefix}${index}`];
@@ -370,12 +413,13 @@ export default {
   id: "comfyuiMiniMaxH3",
   label: "ComfyUI MiniMax H3",
   version,
-  readme: `通过远程 ComfyUI 的 MiniMax H3 节点生成视频，支持文生视频（t2v）、首帧图生视频（i2v）与多参考图生视频（r2v，最多 10 张）。
+  readme: `通过远程 ComfyUI 的 MiniMax H3 节点生成视频，支持文生视频（t2v）、首帧图生视频（i2v）与多参考图生视频（r2v，支持最多 10 张图片与最多 4 段参考音频）。
 
 使用步骤：
 1. 在 ComfyUI 中分别加载三种模式的工作流，用 Save (API Format) 导出 JSON，粘贴到对应配置项；
-2. 工作流需包含 MiniMax H3 生成节点、ResolutionSelector 节点、标题含 Duration/时长的数值节点；i2v/r2v 需含 LoadImage 节点，输出需 SaveVideo 节点；
-3. ComfyUI 服务地址须能被运行 Toonflow 的机器访问（提交、上传与取回视频走同一地址）。
+2. 工作流需包含 MiniMax H3 生成节点、ResolutionSelector 节点、标题含 Duration/时长的数值节点；i2v/r2v 需含 LoadImage 节点，支持音频参考时 r2v 需支持 LoadAudio 节点，输出需 SaveVideo 节点；
+3. 连入参考音频时，可在提示词中用 <Audio 1> 等标签显式引用，若未显式编写会自动补充引用引导；
+4. ComfyUI 服务地址须能被运行 Toonflow 的机器访问（提交、上传与取回视频走同一地址）。
 
 分镜提示词可配合 MiniMax H3 官方提示词模板（h3PromptWriting 技能）使用。`,
   rules,
@@ -384,7 +428,7 @@ export default {
       id: "MiniMax-H3",
       label: "MiniMax H3 (ComfyUI)",
       type: "video",
-      mode: ["text", "startFrameOptional", ["imageReference:10"]],
+      mode: ["text", "startFrameOptional", ["imageReference:10", "audioReference:4"]],
       audio: "optional",
       durationResolutionMap: [{ duration: [4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15], resolution: ["480p", "720p", "1080p"] }],
     },
@@ -392,7 +436,7 @@ export default {
       id: "MiniMax-H3-Turbo",
       label: "MiniMax H3 Turbo (ComfyUI, LoRA 4步快速版)",
       type: "video",
-      mode: ["text", "startFrameOptional", ["imageReference:10"]],
+      mode: ["text", "startFrameOptional", ["imageReference:10", "audioReference:4"]],
       audio: "optional",
       durationResolutionMap: [{ duration: [4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15], resolution: ["480p", "720p", "1080p"] }],
     },
@@ -412,13 +456,13 @@ export default {
       .trim()
       .replace(/\/+$/, "");
     if (!base) throw new Error("请填写 ComfyUI 服务地址");
-    if (request.audios?.length) throw new Error("ComfyUI MiniMax H3 工作流不支持音频参考输入，请移除音频素材");
     if (request.videos?.length) throw new Error("ComfyUI MiniMax H3 工作流不支持视频参考输入，请移除视频素材");
     if (request.lastFrame) throw new Error("当前工作流不支持尾帧输入（FL2VA），请移除尾帧");
 
     const references = (request.images ?? []).slice(0, 10);
+    const audioReferences = (request.audios ?? []).slice(0, 4);
     const hasFirstFrame = !!request.firstFrame;
-    const mode = references.length > 0 ? "r2v" : hasFirstFrame ? "i2v" : "t2v";
+    const mode = (references.length > 0 || audioReferences.length > 0) ? "r2v" : hasFirstFrame ? "i2v" : "t2v";
     // Turbo 模型只影响 r2v 路线：走 LoRA 快速工作流；t2v/i2v 与完整版共用。
     const useTurbo = request.model === "MiniMax-H3-Turbo";
     const workflow = parseWorkflow(
@@ -439,7 +483,12 @@ export default {
     const stamp = Date.now().toString(36);
     const context: providerContext = this as providerContext;
 
-    patchPrompt(workflow, request.prompt.trim());
+    let promptText = request.prompt.trim();
+    if (audioReferences.length > 0 && !/<Audio\s*\d+/i.test(promptText)) {
+      const audioTags = audioReferences.map((_, i) => `<Audio ${i + 1}>`).join(" and ");
+      promptText = `Use ${audioTags} as reference audio. ${promptText}`;
+    }
+    patchPrompt(workflow, promptText);
     const resolutionClassType = Object.values(workflow).find(
       (node) => node?.class_type === "ResolutionSelector" || (node.inputs?.megapixels != null && node.inputs?.aspect_ratio != null),
     )?.class_type;
@@ -451,12 +500,22 @@ export default {
       patchFirstFrame(workflow, name);
     } else if (mode === "r2v") {
       const inputs = [...(hasFirstFrame ? [request.firstFrame!] : []), ...references];
-      const names: string[] = [];
-      for (const [index, input] of inputs.entries()) {
-        const bytes = await toBytes(context, input);
-        names.push(await uploadImage(context, base, bytes, `toonflow_ref_${stamp}_${index}.${imageExtension(input.mimeType)}`, input.mimeType));
+      if (inputs.length > 0) {
+        const names: string[] = [];
+        for (const [index, input] of inputs.entries()) {
+          const bytes = await toBytes(context, input);
+          names.push(await uploadImage(context, base, bytes, `toonflow_ref_${stamp}_${index}.${imageExtension(input.mimeType)}`, input.mimeType || "image/png"));
+        }
+        patchRefImages(workflow, names);
       }
-      patchRefImages(workflow, names);
+      if (audioReferences.length > 0) {
+        const audioNames: string[] = [];
+        for (const [index, input] of audioReferences.entries()) {
+          const bytes = await toBytes(context, input);
+          audioNames.push(await uploadImage(context, base, bytes, `toonflow_ref_audio_${stamp}_${index}.${audioExtension(input.mimeType)}`, input.mimeType || "audio/wav"));
+        }
+        patchRefAudios(workflow, audioNames);
+      }
     }
 
     const clientId = String(this.config.clientId ?? "").trim() || `toonflow-${stamp}`;

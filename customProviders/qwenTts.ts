@@ -34,10 +34,73 @@ const formatMime: Record<string, string> = {
   opus: "audio/ogg",
 };
 
+const languageMap: Record<string, string> = {
+  "zh-CN": "chinese",
+  zh: "chinese",
+  "en-US": "english",
+  en: "english",
+  "ja-JP": "japanese",
+  ja: "japanese",
+  "ko-KR": "korean",
+  ko: "korean",
+  "es-ES": "spanish",
+  es: "spanish",
+  "fr-FR": "french",
+  fr: "french",
+  "pt-PT": "portuguese",
+  pt: "portuguese",
+  "ru-RU": "russian",
+  ru: "russian",
+};
+
+const voicePrefixRegex = /^(?:voice\s*direction\b|voice\b|音色(?:设计)?|声线(?:设计)?|声音(?:描述)?|角色音色)\s*[-—:：]?\s*/i;
+const dialoguePrefixRegex = /^(?:dialogue\b|text\b|script\b|台词|正文|待朗读(?:文本)?|文本|内容)\s*[-—:：]?\s*/i;
+const roleTagRegex = /^[—\-\s]*[^\n，。,.]+\s*[/／]\s*[^\n，。,.]+[\.。;；,，\s]*/;
+
+function cleanVoiceText(text: string): string {
+  return text
+    .replace(voicePrefixRegex, "")
+    .replace(roleTagRegex, "")
+    .replace(/仅指导已有发声[，,。.]*不新增台词[，,。.]*/g, "")
+    .trim();
+}
+
+function cleanDialogueText(text: string): string {
+  return text.replace(dialoguePrefixRegex, "").trim();
+}
+
+function parseMixedBlock(blockText: string): { voice: string; dialogue: string } {
+  const lines = blockText.split("\n");
+  const voiceLines: string[] = [];
+  const textLines: string[] = [];
+  let currentMode: "voice" | "dialogue" | "unknown" = "unknown";
+
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (!trimmed) continue;
+    if (voicePrefixRegex.test(trimmed)) {
+      currentMode = "voice";
+      voiceLines.push(cleanVoiceText(trimmed));
+    } else if (dialoguePrefixRegex.test(trimmed)) {
+      currentMode = "dialogue";
+      textLines.push(cleanDialogueText(trimmed));
+    } else {
+      if (currentMode === "voice") voiceLines.push(trimmed);
+      else if (currentMode === "dialogue") textLines.push(trimmed);
+      else textLines.push(trimmed);
+    }
+  }
+  return {
+    voice: voiceLines.join("\n").trim(),
+    dialogue: textLines.join("\n").trim(),
+  };
+}
+
 /**
- * 画布会把连接的文本参考按「参考 N：\n<内容>」拼进 prompt。
- * 这里按该约定拆分：以 VOICE DIRECTION 开头的参考块作为声线描述（instructions），
- * 其余文本（主输入框与普通文本参考）作为待朗读内容（input）。
+ * 支持同时从节点输入框及连线参考文本中提取声线设计描述与台词。
+ * 1. 输入框支持同时输入「音色：...」与「台词：...」；
+ * 2. 连线参考块支持中文/英文声线前缀自动识别并自动剥离前缀噪点；
+ * 3. 连线参考块若未写前缀但包含声线特征词，自动识别为声线指令。
  */
 function splitPrompt(prompt: string): { input: string; instructions?: string } {
   const marker = /^参考\s*\d+\s*[：:]\s*$/;
@@ -48,13 +111,28 @@ function splitPrompt(prompt: string): { input: string; instructions?: string } {
   }
   const voiceBlocks: string[] = [];
   const textBlocks: string[] = [];
+
   blocks.forEach((block, index) => {
     const text = block.join("\n").trim();
     if (!text) return;
-    // 主输入框（首块）只可能是台词；参考块按开头标记识别声线描述
-    if (index > 0 && /^\s*voice\s*direction\b/i.test(text)) voiceBlocks.push(text);
-    else textBlocks.push(text);
+
+    const lines = text.split("\n").map(l => l.trim()).filter(Boolean);
+    const hasVoiceLine = lines.some(l => voicePrefixRegex.test(l));
+    const hasDialogueLine = lines.some(l => dialoguePrefixRegex.test(l));
+
+    if (hasVoiceLine || hasDialogueLine) {
+      const parsed = parseMixedBlock(text);
+      if (parsed.voice) voiceBlocks.push(parsed.voice);
+      if (parsed.dialogue) textBlocks.push(parsed.dialogue);
+    } else {
+      if (index > 0 && voiceBlocks.length === 0 && /(?:男声|女声|音色|声线|音调|语速|嗓音|口音|萝莉|大叔|少女|老爷爷|老妇|正太)/.test(text)) {
+        voiceBlocks.push(cleanVoiceText(text));
+      } else {
+        textBlocks.push(text);
+      }
+    }
   });
+
   return {
     input: textBlocks.join("\n").trim(),
     instructions: voiceBlocks.length ? voiceBlocks.join("\n") : undefined,
@@ -67,7 +145,11 @@ export default {
   version,
   readme: `本地 oMLX（OpenAI 兼容服务，默认 http://127.0.0.1:8989/v1）上的 Qwen3-TTS-12Hz-1.7B-VoiceDesign-4bit，按文字描述设计角色声线并朗读台词。
 
-用法：画布添加「音频生成」节点并选择本模型；台词写在节点输入框（或连接台词文本节点），声线描述文本节点（以 VOICE DIRECTION 开头）直接连入即可，会自动识别为声线指令而不会被读出来。未连接声线文本时使用模型默认音色。
+用法：
+1. 单节点直接输入：在音频生成节点的输入框中，按如下格式输入：
+   音色：体现撒娇稚嫩的萝莉女声，音调偏高且起伏明显。
+   台词：哥哥，你回来啦！
+2. 连线输入：主输入框写台词，连入一个写有声线描述的文本节点（支持「音色：...」、「声线：...」或英文「VOICE DIRECTION: ...」，会自动识别并清洗前缀）。
 
 前置：oMLX 已加载 Qwen3-TTS-12Hz-1.7B-VoiceDesign-4bit。`,
   rules,
@@ -78,7 +160,7 @@ export default {
       type: "audio",
     },
   ],
-  async generateAudio(request: { prompt?: string; text?: string; speed?: number; format?: string }) {
+  async generateAudio(request: { prompt?: string; text?: string; speed?: number; format?: string; language?: string }) {
     const baseUrl = String(this.config.baseUrl ?? "")
       .trim()
       .replace(/\/+$/, "");
@@ -99,6 +181,8 @@ export default {
 
     const body: Record<string, unknown> = { model: voiceModelId, input, response_format: format };
     if (instructions) body.instructions = instructions;
+    const targetLanguage = request.language ? (languageMap[request.language] ?? request.language.toLowerCase()) : undefined;
+    if (targetLanguage) body.language = targetLanguage;
     if (typeof request.speed === "number" && Number.isFinite(request.speed)) {
       if (request.speed < 0.5 || request.speed > 2) throw new Error("语速倍率须在 0.5 到 2 之间");
       body.speed = request.speed;
