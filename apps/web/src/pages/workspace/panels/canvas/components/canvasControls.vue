@@ -21,6 +21,31 @@
             <icon-folders :size="18" />
           </el-button>
         </el-tooltip>
+        <el-tooltip :showArrow="false" :content="taskTooltipText" placement="top" :hideAfter="0" :enterable="false" :triggerKeys="[]" :disabled="taskPopoverVisible">
+          <span class="toolTrigger">
+            <el-popover trigger="click" placement="top-start" :width="336" v-model:visible="taskPopoverVisible">
+              <template #reference>
+                <el-button
+                  class="toolButton taskButton"
+                  text
+                  :type="taskPopoverVisible ? 'primary' : 'default'"
+                  :aria-pressed="taskPopoverVisible"
+                  aria-label="生成与审阅任务">
+                  <icon-list-check :size="18" />
+                  <span
+                    v-if="taskCounts.total > 0"
+                    class="taskDot"
+                    :class="{
+                      generating: taskCounts.generating > 0,
+                      unreviewed: taskCounts.unreviewed > 0,
+                      outdated: taskCounts.outdated > 0,
+                    }" />
+                </el-button>
+              </template>
+              <canvasTaskPanel />
+            </el-popover>
+          </span>
+        </el-tooltip>
         <!-- trigger 用 contextmenu 是为了让整理按钮只由 arrangeNodes 控制显隐，同时仍保留点击外部自动关闭 -->
         <el-tooltip :showArrow="false" content="整理画布" placement="top" :hideAfter="0" :enterable="false" :triggerKeys="[]" :disabled="undoPopoverVisible">
           <span class="toolTrigger">
@@ -119,9 +144,10 @@
 import { computed, onBeforeUnmount, ref, watch } from "vue";
 import { Panel, useVueFlow, type XYPosition } from "@vue-flow/core";
 import { MiniMap } from "@vue-flow/minimap";
-import { IconMap, IconMagnet, IconFocusCentered } from "@tabler/icons-vue";
+import { IconMap, IconMagnet, IconFocusCentered, IconListCheck } from "@tabler/icons-vue";
 import { ElMessage } from "element-plus";
 import { arrangeCanvas } from "../arrangeCanvas";
+import canvasTaskPanel from "./canvasTaskPanel.vue";
 
 const props = defineProps<{
   canvasId: string;
@@ -133,12 +159,62 @@ const showEdges = defineModel<boolean>("showEdges", { required: true });
 const assetsVisible = defineModel<boolean>("assetsVisible", { default: false });
 const showMap = ref(false);
 const zoomMenuVisible = ref(false);
+const taskPopoverVisible = ref(false);
 const flow = useVueFlow();
 const { viewport, zoomTo, zoomIn, zoomOut, fitView, getNodes, updateNode } = flow;
 const zoomPercent = computed(() => Math.round(viewport.value.zoom * 100));
 const layoutSnapshot = ref<{ id: string; position: XYPosition }[]>();
 const undoPopoverVisible = ref(false);
 const arranging = ref(false);
+
+const taskCounts = computed(() => {
+  let outdated = 0;
+  let unreviewed = 0;
+  let generating = 0;
+
+  getNodes.value.forEach((node) => {
+    const rawType = node.type?.replace(/^remote-/, "") ?? "";
+    if (rawType !== "videoGenerationNode" && rawType !== "imageGenerationNode" && rawType !== "audioGenerationNode") return;
+    const data = (node.data ?? {}) as {
+      prompt?: string;
+      lastGeneratedPrompt?: string;
+      unreviewed?: boolean;
+      mediaTask?: { state?: string };
+    };
+
+    const taskState = data.mediaTask?.state;
+    const isGenerating = taskState === "submitting" || taskState === "running";
+    if (isGenerating) {
+      generating++;
+      return;
+    }
+
+    const prompt = (data.prompt ?? "").trim();
+    const lastPrompt = (data.lastGeneratedPrompt ?? "").trim();
+    if (data.lastGeneratedPrompt !== undefined && prompt !== lastPrompt) {
+      outdated++;
+    }
+    if (data.unreviewed === true) {
+      unreviewed++;
+    }
+  });
+
+  return {
+    outdated,
+    unreviewed,
+    generating,
+    total: outdated + unreviewed + generating,
+  };
+});
+
+const taskTooltipText = computed(() => {
+  const parts: string[] = [];
+  if (taskCounts.value.generating) parts.push(`${taskCounts.value.generating} 个生成中`);
+  if (taskCounts.value.unreviewed) parts.push(`${taskCounts.value.unreviewed} 个新生成待查看`);
+  if (taskCounts.value.outdated) parts.push(`${taskCounts.value.outdated} 个待重新生成`);
+  if (!parts.length) return "生成与审阅任务";
+  return `生成与审阅任务（${parts.join("，")}）`;
+});
 let arrangeController: AbortController | undefined;
 const canArrange = computed(() => {
   const nodes = getNodes.value.filter((node) => !node.parentNode);
@@ -233,6 +309,36 @@ async function undoArrange() {
     padding: 0;
     font-size: 12px;
     font-variant-numeric: tabular-nums;
+
+    &.taskButton {
+      position: relative;
+
+      .taskDot {
+        position: absolute;
+        top: 4px;
+        right: 4px;
+        width: 7px;
+        height: 7px;
+        border-radius: 50%;
+        background-color: var(--el-color-danger, #f56c6c);
+        box-shadow: 0 0 0 1.5px var(--el-bg-color);
+        transition: all 0.2s ease;
+
+        &.unreviewed {
+          background-color: var(--el-color-success, #67c23a);
+          animation: dotPulse 2s infinite ease-in-out;
+        }
+
+        &.outdated {
+          background-color: var(--el-color-warning, #e6a23c);
+        }
+
+        &.generating {
+          background-color: var(--el-color-primary, #409eff);
+          animation: dotPulse 1.2s infinite ease-in-out;
+        }
+      }
+    }
   }
 }
 
@@ -247,6 +353,21 @@ async function undoArrange() {
   .zoomAction {
     justify-content: flex-start;
     margin-left: 0;
+  }
+}
+
+@keyframes dotPulse {
+  0% {
+    transform: scale(0.9);
+    opacity: 0.75;
+  }
+  50% {
+    transform: scale(1.25);
+    opacity: 1;
+  }
+  100% {
+    transform: scale(0.9);
+    opacity: 0.75;
   }
 }
 </style>

@@ -9,6 +9,9 @@
     :downloadName="outputFile?.url.split(/[\\/]/).at(-1)"
     :fullscreenVisible="false"
     style="width: 360px">
+    <template #titleExtra>
+      <generationBadge :isOutdated="isOutdated" :isUnreviewed="isUnreviewed" @reviewed="markAsReviewed" />
+    </template>
     <template #topActions>
       <el-button :icon="IconTextRecognition" :loading="transcribing" :disabled="busy || !outputFile" text title="音频转文本" aria-label="音频转文本" @click.stop="transcribe">转文本</el-button>
       <el-button v-if="transcribing" :icon="IconPlayerStop" text title="取消转文本" aria-label="取消转文本" @click.stop="cancelTranscription">取消</el-button>
@@ -18,7 +21,7 @@
       <input ref="fileInput" type="file" accept="audio/*" hidden aria-label="选择替换音频" :disabled="busy" @change="replaceOutput" />
     </template>
     <div v-loading="generating || uploading" class="audioContent nopan" :aria-busy="generating || uploading">
-      <audioPlayer v-if="previewUrl" ref="player" v-model:pcmOptions="pcmOptions" class="audioPreview" :src="previewUrl" :mimeType="outputFile?.mimeType" @loadedmetadata="updateNodeInternals" />
+      <audioPlayer v-if="previewUrl" ref="player" v-model:pcmOptions="pcmOptions" class="audioPreview" :src="previewUrl" :mimeType="outputFile?.mimeType" @play="markAsReviewed" @loadedmetadata="updateNodeInternals" />
       <div v-else class="audioEmpty" role="img" aria-label="暂无生成音频"><icon-music-bolt :size="48" stroke="1.25" aria-hidden="true" /></div>
     </div>
     <template #bottom>
@@ -53,10 +56,11 @@
             <el-button v-if="pendingRecovery" class="sendButton" :icon="IconPlayerStop" :loading="cancelling" :disabled="deleting || uploading || transcribing || actions?.processing" title="放弃任务" aria-label="放弃任务" @click="generationState.cancel().catch(error => showNodeError(error, '停止生成失败'))" />
             <el-button
               class="sendButton"
-              :icon="generating ? IconPlayerStop : IconArrowUp"
+              :class="{ isOutdated }"
+              :icon="generating ? IconPlayerStop : isOutdated ? IconRefresh : IconArrowUp"
               :disabled="cancelling || deleting || uploading || transcribing || actions?.processing || (!generating && !pendingRecovery && (!generationPrompt || !selectedModel))"
-              :title="generating ? '停止生成' : pendingRecovery ? '复查任务' : '生成音频'"
-              :aria-label="generating ? '停止生成' : pendingRecovery ? '复查任务' : '生成音频'"
+              :title="generating ? '停止生成' : pendingRecovery ? '复查任务' : isOutdated ? '提示词已修改，重新生成' : '生成音频'"
+              :aria-label="generating ? '停止生成' : pendingRecovery ? '复查任务' : isOutdated ? '提示词已修改，重新生成' : '生成音频'"
               @click="generating ? generationState.cancel().catch(error => showNodeError(error, '停止生成失败')) : startGeneration().catch(error => showNodeError(error, '音频生成失败'))" />
           </div>
         </div>
@@ -69,12 +73,14 @@
 <script setup lang="ts">
 import { computed, onMounted, onScopeDispose, ref, shallowRef, watch } from "vue";
 import { ElButton, ElCard, ElLoading, ElOption, ElOptionGroup, ElSelect } from "element-plus";
-import { IconArrowUp, IconGauge, IconMusicBolt, IconPlayerStop, IconScissors, IconTransfer, IconTextRecognition } from "@tabler/icons-vue";
+import { IconArrowUp, IconGauge, IconMusicBolt, IconPlayerStop, IconScissors, IconTransfer, IconTextRecognition, IconRefresh } from "@tabler/icons-vue";
 import { getTargetValues, isTypeCompatible, nodeSkeleton, nodeTools, useNode, z, type NodeAudioRequest, type NodeHandle, type NodeInputValue, type NodeMediaModel } from "@toonflow/nodes-scaffold/runtime";
 import { groupNodeModels } from "@toonflow/node-shared/groupNodeModels";
 import modelLabel from "@toonflow/node-shared/modelLabel";
 import { showNodeError } from "@toonflow/node-shared/showNodeError";
 import { useNodeGeneration } from "@toonflow/node-shared/useNodeGeneration";
+import { useGenerationStatus } from "@toonflow/node-shared/useGenerationStatus";
+import generationBadge from "@toonflow/node-shared/generationBadge";
 import { useAudioTranscription } from "@toonflow/node-shared/useAudioTranscription";
 import { getMediaMimeType } from "@toonflow/node-shared/mediaTypes";
 import type { PcmOptions } from "@toonflow/node-shared/pcmPreview";
@@ -117,6 +123,7 @@ const player = ref<InstanceType<typeof audioPlayer>>();
 const actions = ref<InstanceType<typeof audioActions>>();
 const speedTarget = ref<HTMLElement>();
 const outputFile = computed(() => outputs.value.audio?.dataType === "AUDIO" ? outputs.value.audio.value : undefined);
+const { isOutdated, isUnreviewed, recordGenerated, markAsReviewed } = useGenerationStatus(data, outputFile);
 const pcmOptions = ref<Partial<PcmOptions>>({});
 watch(() => outputFile.value?.url, () => { pcmOptions.value = {}; }, { flush: "sync" });
 const { processing: transcribing, transcribe, cancel: cancelTranscription, cancelAndWait: cancelTranscriptionAndWait } = useAudioTranscription(outputFile);
@@ -234,6 +241,7 @@ async function startGeneration() {
     controller.signal.throwIfAborted();
     if (!result) throw new Error("供应商未返回音频");
     outputs.value.audio = { dataType: "AUDIO", value: { url: result.path, mimeType: result.mimeType } };
+    recordGenerated(generationPrompt.value);
   }).catch(error => showNodeError(error, "音频生成失败")).finally(() => {
     generationController = undefined;
   });
@@ -399,6 +407,12 @@ nodeTools.register({
         --el-button-hover-bg-color: var(--el-text-color-regular);
         --el-button-hover-border-color: transparent;
         --el-button-hover-text-color: var(--el-bg-color);
+
+        &.isOutdated {
+          --el-button-bg-color: var(--el-color-warning);
+          --el-button-hover-bg-color: var(--el-color-warning-light-3);
+          box-shadow: 0 0 0 2px var(--el-color-warning-light-8);
+        }
       }
     }
   }

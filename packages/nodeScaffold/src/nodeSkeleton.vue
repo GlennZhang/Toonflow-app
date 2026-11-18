@@ -105,6 +105,7 @@
         @keydown.enter.stop.prevent="editLabel">
         {{ label }}
       </span>
+      <slot name="titleExtra" />
       <div v-if="!readOnly" class="nodeActions nodrag nopan" @pointerdown.stop @mousedown.stop @dblclick.stop>
         <el-button
           :icon="IconRefresh"

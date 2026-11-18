@@ -61,8 +61,13 @@ export type NodeAiTool = {
 };
 
 async function readResult<T>(response: Response): Promise<T> {
-  const result = await response.json();
-  if (!response.ok || result.code !== 200) throw Object.assign(new Error(result.message || `AI 请求失败（HTTP ${response.status}），请稍后重试。`), { status: response.status });
+  let result: { code?: number; message?: string; data: T } | undefined;
+  try {
+    result = await response.json() as { code?: number; message?: string; data: T };
+  } catch {
+    throw Object.assign(new Error(`服务未响应或连接已断开（HTTP ${response.status}），请检查后端服务是否正常运行。`), { status: response.status });
+  }
+  if (!response.ok || result?.code !== 200) throw Object.assign(new Error(result?.message || `AI 请求失败（HTTP ${response.status}），请稍后重试。`), { status: response.status });
   return result.data;
 }
 

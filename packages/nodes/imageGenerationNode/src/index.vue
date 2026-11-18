@@ -9,6 +9,9 @@
     @fullscreen="previewVisible = true"
     :bottomWidth="660"
     :style="{ width: (previewUrl || inpaintGuideUrl) && imageWidth ? `${imageWidth + 18}px` : undefined }">
+    <template #titleExtra>
+      <generationBadge :isOutdated="isOutdated" :isUnreviewed="isUnreviewed" @reviewed="markAsReviewed" />
+    </template>
     <template v-if="editor?.mode" #top><div ref="paintToolbar" /></template>
     <template #topActions>
       <el-button class="panoramaButton" :icon="IconPanoramaHorizontal" :disabled="generating || deleting || uploading || editor?.busy || lighting?.generating || multiAngle?.generating || gridSplit?.splitting || panorama?.busy || !previewUrl" text title="全景图" aria-label="全景图" @click.stop="panorama?.open($event)">全景图<icon-chevron-down class="menuChevron" :size="14" /></el-button>
@@ -94,10 +97,11 @@
             <el-button v-if="pendingRecovery" class="sendButton" :icon="IconPlayerStop" :loading="cancelling" :disabled="deleting || uploading" title="放弃任务" aria-label="放弃任务" @click="generationState.cancel().catch(error => showNodeError(error, '停止生成失败'))" />
             <el-button
               class="sendButton"
-              :icon="generating ? IconPlayerStop : IconArrowUp"
+              :class="{ isOutdated }"
+              :icon="generating ? IconPlayerStop : isOutdated ? IconRefresh : IconArrowUp"
               :disabled="cancelling || deleting || uploading || (!generating && (editor?.busy || (!pendingRecovery && (!generationPrompt || !selectedModel))))"
-              :title="generating ? '停止生成' : pendingRecovery ? '复查任务' : '生成图片'"
-              :aria-label="generating ? '停止生成' : pendingRecovery ? '复查任务' : '生成图片'"
+              :title="generating ? '停止生成' : pendingRecovery ? '复查任务' : isOutdated ? '提示词已修改，重新生成' : '生成图片'"
+              :aria-label="generating ? '停止生成' : pendingRecovery ? '复查任务' : isOutdated ? '提示词已修改，重新生成' : '生成图片'"
               @click="generating ? generationState.cancel().catch(error => showNodeError(error, '停止生成失败')) : startGeneration().catch((error) => showNodeError(error, '图片生成失败'))" />
           </div>
         </div>
@@ -119,13 +123,15 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, onScopeDispose, ref, shallowRef, watch } from "vue";
 import { ElButton, ElCard, ElSelect, ElOption, ElOptionGroup, ElLoading, ElImageViewer } from "element-plus";
-import { IconCheck, IconPhotoAi, IconSparkles, IconArrowUp, IconPlayerStop, IconTransfer, IconLayoutGrid, IconBrush, IconPencil, IconSun, IconCameraRotate, IconPanoramaHorizontal, IconChevronDown } from "@tabler/icons-vue";
+import { IconCheck, IconPhotoAi, IconSparkles, IconArrowUp, IconPlayerStop, IconTransfer, IconLayoutGrid, IconBrush, IconPencil, IconSun, IconCameraRotate, IconPanoramaHorizontal, IconChevronDown, IconRefresh } from "@tabler/icons-vue";
 import { nodeSkeleton, nodeTools, useNode, z, type NodeMediaModel, type NodeImageRequest, type NodeHandle } from "@toonflow/nodes-scaffold/runtime";
 import { groupNodeModels } from "@toonflow/node-shared/groupNodeModels";
 import { getMediaMimeType } from "@toonflow/node-shared/mediaTypes";
 import modelLabel from "@toonflow/node-shared/modelLabel";
 import { showNodeError } from "@toonflow/node-shared/showNodeError";
 import { useNodeGeneration } from "@toonflow/node-shared/useNodeGeneration";
+import { useGenerationStatus } from "@toonflow/node-shared/useGenerationStatus";
+import generationBadge from "@toonflow/node-shared/generationBadge";
 import { useNodeReferences } from "@toonflow/node-shared/useNodeReferences";
 import { useModelForm } from "@toonflow/node-shared/useModelForm";
 import promptInput from "@toonflow/node-shared/promptInput";
@@ -252,6 +258,7 @@ const priceInput = computed(() => {
   return inpaint ? buildInpaintRequest(input, inpaint) : input;
 });
 const outputFile = computed(() => outputs.value.image?.dataType === "IMAGE" ? outputs.value.image.value : undefined);
+const { isOutdated, isUnreviewed, recordGenerated, markAsReviewed } = useGenerationStatus(data, outputFile);
 const inpaintGuideUrl = files.useFileUrl(
   () => data.value.inpaint?.guide ? { url: data.value.inpaint.guide, mimeType: "image/png" } : undefined,
   error => showNodeError(error, "重绘标注读取失败")
@@ -375,6 +382,7 @@ async function startGeneration() {
       controller.signal.throwIfAborted();
       if (!result) throw new Error("供应商未返回图片");
       outputs.value.image = { dataType: "IMAGE", value: { url: result.path, mimeType: result.mimeType } };
+      recordGenerated(data.value.prompt);
     }))
     .catch((error) => showNodeError(error, "图片生成失败"))
     .finally(() => {
@@ -596,6 +604,12 @@ nodeTools.register({
         --el-button-hover-bg-color: var(--el-text-color-regular);
         --el-button-hover-border-color: transparent;
         --el-button-hover-text-color: var(--el-bg-color);
+
+        &.isOutdated {
+          --el-button-bg-color: var(--el-color-warning);
+          --el-button-hover-bg-color: var(--el-color-warning-light-3);
+          box-shadow: 0 0 0 2px var(--el-color-warning-light-8);
+        }
       }
     }
   }

@@ -19,6 +19,8 @@
     "./useNodeGeneration": "./src/useNodeGeneration.ts",
     "./useModelForm": "./src/useModelForm.ts",
     "./useAudioTranscription": "./src/useAudioTranscription.ts",
+    "./useGenerationStatus": "./src/useGenerationStatus.ts",
+    "./generationBadge": "./src/components/generationBadge.vue",
     "./groupNodeModels": "./src/groupNodeModels.ts"
   },
   "scripts": {

@@ -144,6 +144,9 @@ export function useNodeGeneration(outputs: Readonly<Ref<NodeOutputs>>, cancel: (
     checkTask(task, context);
     const applied = task.applied;
     task.applied = true;
+    const nodeData = node.data as { prompt?: string; lastGeneratedPrompt?: string; unreviewed?: boolean };
+    nodeData.lastGeneratedPrompt = nodeData.prompt ?? "";
+    nodeData.unreviewed = true;
     try { await context.save(signal); }
     catch (error) { task.applied = applied; throw error; }
   }

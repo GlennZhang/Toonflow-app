@@ -9,6 +9,9 @@
     @fullscreen="player?.enterFullscreen()"
     :bottomWidth="660"
     :style="{ width: previewUrl && videoWidth ? `${videoWidth + 18}px` : undefined }">
+    <template #titleExtra>
+      <generationBadge :isOutdated="isOutdated" :isUnreviewed="isUnreviewed" @reviewed="markAsReviewed" />
+    </template>
     <template #topActions>
       <el-button :icon="IconMusic" text :disabled="!outputFile || generating || deleting || uploading || actions?.processing" @click.stop="actions?.open('extractAudio')">提取音轨</el-button>
       <el-button :icon="IconLayersSubtract" text :disabled="!outputFile || generating || deleting || uploading || actions?.processing" @click.stop="actions?.open('separate')">分离音视频</el-button>
@@ -36,6 +39,7 @@
         ref="player"
         :src="previewUrl"
         label="生成视频"
+        @play="markAsReviewed"
         @loadedmetadata="resizeVideo" />
       <div v-else class="videoEmpty" role="img" aria-label="暂无生成视频">
         <icon-camera-ai :size="48" stroke="1.25" aria-hidden="true" />
@@ -92,10 +96,11 @@
             <el-button v-if="pendingRecovery" class="sendButton" :icon="IconPlayerStop" :loading="cancelling" :disabled="deleting || uploading" title="放弃任务" aria-label="放弃任务" @click="generationState.cancel().catch(error => showNodeError(error, '停止生成失败'))" />
             <el-button
               class="sendButton"
-              :icon="generating ? IconPlayerStop : IconArrowUp"
+              :class="{ isOutdated }"
+              :icon="generating ? IconPlayerStop : isOutdated ? IconRefresh : IconArrowUp"
               :disabled="cancelling || deleting || uploading || (!generating && !pendingRecovery && (!generationPrompt || !selectedModel))"
-              :title="generating ? '停止生成' : pendingRecovery ? '复查任务' : '生成视频'"
-              :aria-label="generating ? '停止生成' : pendingRecovery ? '复查任务' : '生成视频'"
+              :title="generating ? '停止生成' : pendingRecovery ? '复查任务' : isOutdated ? '提示词已修改，重新生成' : '生成视频'"
+              :aria-label="generating ? '停止生成' : pendingRecovery ? '复查任务' : isOutdated ? '提示词已修改，重新生成' : '生成视频'"
               @click="generating ? generationState.cancel().catch(error => showNodeError(error, '停止生成失败')) : startGeneration().catch((error) => showNodeError(error, '视频生成失败'))" />
           </div>
         </div>
@@ -108,12 +113,14 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, onScopeDispose, ref, shallowRef, watch } from "vue";
 import { ElButton, ElCard, ElSelect, ElOption, ElOptionGroup, ElLoading, ElDropdown, ElDropdownMenu, ElDropdownItem } from "element-plus";
-import { IconCameraAi, IconSparkles, IconArrowUp, IconPlayerStop, IconTransfer, IconMusic, IconLayersSubtract, IconScissors, IconMovie, IconPhotoScan, IconPlayerSkipBack, IconPlayerSkipForward } from "@tabler/icons-vue";
+import { IconCameraAi, IconSparkles, IconArrowUp, IconPlayerStop, IconTransfer, IconMusic, IconLayersSubtract, IconScissors, IconMovie, IconPhotoScan, IconPlayerSkipBack, IconPlayerSkipForward, IconRefresh } from "@tabler/icons-vue";
 import { nodeSkeleton, nodeTools, useNode, z, type NodeMediaModel, type NodeVideoRequest, type NodeHandle } from "@toonflow/nodes-scaffold/runtime";
 import { groupNodeModels } from "@toonflow/node-shared/groupNodeModels";
 import modelLabel from "@toonflow/node-shared/modelLabel";
 import { showNodeError } from "@toonflow/node-shared/showNodeError";
 import { useNodeGeneration } from "@toonflow/node-shared/useNodeGeneration";
+import { useGenerationStatus } from "@toonflow/node-shared/useGenerationStatus";
+import generationBadge from "@toonflow/node-shared/generationBadge";
 import { useModelForm } from "@toonflow/node-shared/useModelForm";
 import { useNodeReferences } from "@toonflow/node-shared/useNodeReferences";
 import { getPromptText } from "@toonflow/node-shared/promptText";
@@ -276,6 +283,7 @@ function getGenerationInput(prompt: string): Omit<NodeVideoRequest, "directory">
   };
 }
 const outputFile = computed(() => outputs.value.video?.dataType === "VIDEO" ? outputs.value.video.value : undefined);
+const { isOutdated, isUnreviewed, recordGenerated, markAsReviewed } = useGenerationStatus(data, outputFile);
 const previewUrl = files.useFileUrl(
   outputFile,
   (error) => showNodeError(error, "视频读取失败")
@@ -386,6 +394,7 @@ async function startGeneration() {
       controller.signal.throwIfAborted();
       if (!result) throw new Error("供应商未返回视频");
       outputs.value.video = { dataType: "VIDEO", value: { url: result.path, mimeType: result.mimeType } };
+      recordGenerated(prompt);
     }))
     .catch((error) => showNodeError(error, "视频生成失败"))
     .finally(() => {
@@ -582,6 +591,12 @@ nodeTools.register({
         --el-button-hover-bg-color: var(--el-text-color-regular);
         --el-button-hover-border-color: transparent;
         --el-button-hover-text-color: var(--el-bg-color);
+
+        &.isOutdated {
+          --el-button-bg-color: var(--el-color-warning);
+          --el-button-hover-bg-color: var(--el-color-warning-light-3);
+          box-shadow: 0 0 0 2px var(--el-color-warning-light-8);
+        }
       }
     }
   }
