@@ -152,7 +152,7 @@ async function handleGenerate(body: { prompt?: unknown; refs?: unknown; size?: u
     const outPath = join(directory, "codex_output.png");
     let fullPrompt = `Generate exactly ONE image and save it as a PNG file to this absolute path: ${outPath}\n\n`;
     if (refFiles.length > 0) {
-      fullPrompt += `You are given ${refFiles.length} attached reference image(s). Use them ONLY to keep the subject/scene appearance consistent. Do NOT copy their layout, framing, or collage composition. Produce a single continuous image.\n\n`;
+      fullPrompt += `You are given ${refFiles.length} attached reference image(s). Maintain strict visual consistency with the reference image(s), especially the subject's appearance, character features, prop design, framing, camera angle, and scroll/object width, while applying the modifications described below. Do not create a grid, collage, or split image; produce a single continuous image.\n\n`;
     }
     fullPrompt += prompt;
     const hint = aspectHintFromSize(size);
