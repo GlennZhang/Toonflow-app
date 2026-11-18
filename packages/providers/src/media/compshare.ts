@@ -1658,7 +1658,12 @@ async function generateH3Video(context: Context, request: VideoRequest, apiKey: 
   });
   const taskId = typeof submitPayload.task_id === "string" ? submitPayload.task_id : "";
   if (!taskId) {
-    throw new Error("提交 MiniMax H3 任务失败：接口未返回任务编号");
+    const errorMsg = typeof submitPayload.Message === "string" ? submitPayload.Message
+      : typeof submitPayload.message === "string" ? submitPayload.message
+      : typeof (submitPayload.base_resp as { status_msg?: unknown })?.status_msg === "string" ? (submitPayload.base_resp as { status_msg: string }).status_msg
+      : "";
+    const retCode = submitPayload.RetCode !== undefined ? ` (RetCode: ${submitPayload.RetCode})` : "";
+    throw new Error("提交 MiniMax H3 任务失败：" + (errorMsg ? `${errorMsg}${retCode}` : "接口未返回任务编号"));
   }
   await context.saveTaskData?.({ kind: "h3Video", taskId, model: request.model, deadline: Date.now() + H3_TOTAL_TIMEOUT });
   return waitForH3Video(context, taskId, apiKey);
