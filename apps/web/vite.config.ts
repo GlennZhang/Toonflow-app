@@ -16,6 +16,7 @@ export default defineConfig(({ command }) => ({
     "import.meta.env.appVersion": JSON.stringify(desktopConfig.app.version),
   },
   server: {
+    port: Number(process.env.TOONFLOW_WEB_PORT) || 5173,
     proxy: {
       "/mcp": { target: serverOrigin, changeOrigin: false },
       "/a2a": { target: serverOrigin, changeOrigin: false },
