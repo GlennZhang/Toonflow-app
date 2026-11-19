@@ -61,7 +61,7 @@ function getInstallFailure(local: Awaited<ReturnType<DesktopRuntime["updater"]["
     currentVersion: local.version,
     currentHash: local.hash,
     message: translateMessage(message),
-    downloadUrl: "https://github.com/HBAI-Ltd/Toonflow-app/releases/latest",
+    downloadUrl: "https://github.com/GlennZhang/Toonflow-app/releases/latest",
   };
 }
 
