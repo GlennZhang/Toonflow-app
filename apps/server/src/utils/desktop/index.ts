@@ -8,7 +8,7 @@ import { messageError } from "@toonflow/i18n/errors";
 
 const updateBaseUrls = {
   official: "https://api.toonflow.net/web/version/desktopUpdates",
-  github: "https://github.com/HBAI-Ltd/Toonflow-app/releases/latest/download",
+  github: "https://github.com/GlennZhang/Toonflow-app/releases/latest/download",
 };
 const updateRuntimeId = crypto.randomUUID();
 let cancelledUpdateAttempt: string | undefined;
@@ -85,9 +85,9 @@ export function isValidUpdateUrl(value: unknown): value is string {
 
 function getUpdateBaseUrl(): string {
   const settings = conf.get("settings", {});
-  if (settings.desktopUpdateSource === "github") return updateBaseUrls.github;
+  if (settings.desktopUpdateSource === "official") return updateBaseUrls.official;
   if (settings.desktopUpdateSource === "custom" && isValidUpdateUrl(settings.desktopUpdateCustomUrl)) return settings.desktopUpdateCustomUrl;
-  return updateBaseUrls.official;
+  return updateBaseUrls.github;
 }
 
 async function withUpdateSource<T>(updater: DesktopRuntime["updater"], updateBaseUrl: string, run: () => Promise<T>) {
